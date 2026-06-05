@@ -143,11 +143,6 @@ let cachedCatalogManifest: {
 } | null = null;
 
 function loadCatalogManifest(): CatalogManifestFile {
-  if (!existsSync(catalogManifestPath)) {
-    throw new Error(
-      `Teams catalog manifest not found at ${catalogManifestPath}. Run pnpm --filter @paperclipai/teams-catalog build:manifest.`,
-    );
-  }
   return JSON.parse(readFileSync(catalogManifestPath, "utf8")) as CatalogManifestFile;
 }
 
@@ -336,12 +331,35 @@ function yamlScalar(value: string | number | boolean | null) {
   return JSON.stringify(value);
 }
 
-function renderStringArrayYaml(key: string, values: string[]) {
-  if (values.length === 0) return [];
-  return [
-    `${key}:`,
-    ...values.map((value) => `  - ${yamlScalar(value)}`),
-  ];
+function renderYamlValue(key: string, value: unknown, indent = 0): string[] {
+  const prefix = " ".repeat(indent);
+  if (Array.isArray(value)) {
+    if (value.length === 0) return [];
+    const lines = [`${prefix}${key}:`];
+    for (const entry of value) {
+      if (typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean" || entry === null) {
+        lines.push(`${prefix}  - ${yamlScalar(entry)}`);
+        continue;
+      }
+      if (isPlainRecord(entry)) {
+        lines.push(`${prefix}  -`);
+        for (const [nestedKey, nestedValue] of Object.entries(entry)) {
+          lines.push(...renderYamlValue(nestedKey, nestedValue, indent + 4));
+        }
+      }
+    }
+    return lines;
+  }
+  if (isPlainRecord(value)) {
+    const nestedLines = Object.entries(value).flatMap(([nestedKey, nestedValue]) =>
+      renderYamlValue(nestedKey, nestedValue, indent + 2),
+    );
+    return nestedLines.length > 0 ? [`${prefix}${key}:`, ...nestedLines] : [];
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || value === null) {
+    return [`${prefix}${key}: ${yamlScalar(value)}`];
+  }
+  return [];
 }
 
 function renderSyntheticCompanyMarkdown(team: CatalogTeam) {
@@ -457,30 +475,69 @@ function parseYamlFrontmatter(raw: string): Record<string, unknown> {
       content: line.trim(),
     }))
     .filter((line) => line.content.length > 0 && !line.content.startsWith("#"));
+  if (lines.length === 0) return {};
+  const parsed = parseYamlBlock(lines, 0, lines[0]!.indent);
+  return isPlainRecord(parsed.value) ? parsed.value : {};
+}
+
+function parseYamlBlock(
+  lines: Array<{ indent: number; content: string }>,
+  startIndex: number,
+  indentLevel: number,
+): { value: unknown; nextIndex: number } {
+  let index = startIndex;
+  if (index >= lines.length || lines[index]!.indent < indentLevel) {
+    return { value: {}, nextIndex: index };
+  }
+
+  const isArray = lines[index]!.indent === indentLevel && lines[index]!.content.startsWith("-");
+  if (isArray) {
+    const values: unknown[] = [];
+    while (index < lines.length) {
+      const line = lines[index]!;
+      if (line.indent < indentLevel) break;
+      if (line.indent !== indentLevel || !line.content.startsWith("-")) break;
+
+      const remainder = line.content.slice(1).trim();
+      index += 1;
+      if (!remainder) {
+        const nested = parseYamlBlock(lines, index, indentLevel + 2);
+        values.push(nested.value);
+        index = nested.nextIndex;
+        continue;
+      }
+      values.push(parseYamlScalar(remainder));
+    }
+    return { value: values, nextIndex: index };
+  }
+
   const record: Record<string, unknown> = {};
-  for (let index = 0; index < lines.length; index += 1) {
+  while (index < lines.length) {
     const line = lines[index]!;
-    if (line.indent !== 0) continue;
-    const separatorIndex = line.content.indexOf(":");
-    if (separatorIndex <= 0) continue;
-    const key = line.content.slice(0, separatorIndex).trim();
-    const remainder = line.content.slice(separatorIndex + 1).trim();
-    if (remainder) {
-      record[key] = parseYamlScalar(remainder);
+    if (line.indent < indentLevel) break;
+    if (line.indent !== indentLevel) {
+      index += 1;
       continue;
     }
-    const values: string[] = [];
-    while (index + 1 < lines.length && lines[index + 1]!.indent > line.indent) {
-      const next = lines[index + 1]!;
-      if (next.indent === line.indent + 2 && next.content.startsWith("-")) {
-        const value = next.content.slice(1).trim();
-        if (value) values.push(String(parseYamlScalar(value)));
-      }
+
+    const separatorIndex = line.content.indexOf(":");
+    if (separatorIndex <= 0) {
       index += 1;
+      continue;
     }
-    record[key] = values;
+
+    const key = line.content.slice(0, separatorIndex).trim();
+    const remainder = line.content.slice(separatorIndex + 1).trim();
+    index += 1;
+    if (!remainder) {
+      const nested = parseYamlBlock(lines, index, indentLevel + 2);
+      record[key] = nested.value;
+      index = nested.nextIndex;
+      continue;
+    }
+    record[key] = parseYamlScalar(remainder);
   }
-  return record;
+  return { value: record, nextIndex: index };
 }
 
 function parseFrontmatterMarkdown(raw: string): MarkdownDoc {
@@ -502,13 +559,7 @@ function renderSimpleMarkdown(frontmatter: Record<string, unknown>, body: string
   const lines = ["---"];
   for (const [key, value] of Object.entries(frontmatter)) {
     if (value === undefined) continue;
-    if (Array.isArray(value)) {
-      lines.push(...renderStringArrayYaml(key, value.filter((entry): entry is string => typeof entry === "string")));
-      continue;
-    }
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || value === null) {
-      lines.push(`${key}: ${yamlScalar(value)}`);
-    }
+    lines.push(...renderYamlValue(key, value));
   }
   lines.push("---", "");
   const cleanBody = body.trim();

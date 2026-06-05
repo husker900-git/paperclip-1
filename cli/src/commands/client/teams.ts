@@ -39,7 +39,10 @@ interface TeamPreviewOptions extends BaseClientOptions {
   allowLocalPathSources?: boolean;
 }
 
-interface TeamInstallOptions extends TeamPreviewOptions {}
+interface TeamInstallOptions extends TeamPreviewOptions {
+  secretValue?: string[];
+  adapterOverride?: string[];
+}
 
 export function registerTeamCommands(program: Command): void {
   const teams = program.command("teams").description("App-shipped team catalog operations");
@@ -192,6 +195,8 @@ export function registerTeamCommands(program: Command): void {
       .option("--allow-external-sources", "Allow GitHub, URL, or skills.sh skill sources declared by the catalog team", false)
       .option("--allow-unpinned-optional-sources", "Allow optional-team external skill sources that are not pinned to a commit", false)
       .option("--allow-local-path-sources", "Development only: allow local-path skill sources declared by the catalog team", false)
+      .option("--secret-value <key=value>", "Secret/plain env input value for required team install inputs; may be repeated", collectOptionValue, [] as string[])
+      .option("--adapter-override <slug=json>", "Adapter override JSON for an imported agent slug; may be repeated", collectOptionValue, [] as string[])
       .action(async (catalogRef: string, opts: TeamInstallOptions) => {
         try {
           const ctx = resolveCommandContext(opts, { requireCompany: true });
@@ -320,7 +325,11 @@ function buildTeamOptions(opts: TeamPreviewOptions): CatalogTeamImportOptions {
 }
 
 function buildTeamInstallOptions(opts: TeamInstallOptions): CatalogTeamInstallOptions {
-  return buildTeamOptions(opts);
+  return removeUndefined({
+    ...buildTeamOptions(opts),
+    secretValues: parseKeyValueOptions(opts.secretValue, "--secret-value"),
+    adapterOverrides: parseAdapterOverrides(opts.adapterOverride),
+  });
 }
 
 function buildSourcePolicy(opts: TeamPreviewOptions): CatalogTeamSourcePolicy | undefined {
@@ -333,19 +342,54 @@ function buildSourcePolicy(opts: TeamPreviewOptions): CatalogTeamSourcePolicy | 
 }
 
 function parseNameOverrides(values: string[] | undefined): Record<string, string> | undefined {
+  return parseKeyValueOptions(values, "--name-override");
+}
+
+function parseKeyValueOptions(values: string[] | undefined, flagName: string): Record<string, string> | undefined {
   if (!values || values.length === 0) return undefined;
   const result: Record<string, string> = {};
   for (const raw of values) {
     const separator = raw.indexOf("=");
     if (separator <= 0) {
-      throw new Error(`Invalid --name-override "${raw}". Use slug=name.`);
+      throw new Error(`Invalid ${flagName} "${raw}". Use key=value.`);
+    }
+    const key = raw.slice(0, separator).trim();
+    const value = raw.slice(separator + 1).trim();
+    if (!key || !value) {
+      throw new Error(`Invalid ${flagName} "${raw}". Use key=value.`);
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
+function parseAdapterOverrides(values: string[] | undefined): CatalogTeamInstallOptions["adapterOverrides"] | undefined {
+  if (!values || values.length === 0) return undefined;
+  const result: NonNullable<CatalogTeamInstallOptions["adapterOverrides"]> = {};
+  for (const raw of values) {
+    const separator = raw.indexOf("=");
+    if (separator <= 0) {
+      throw new Error(`Invalid --adapter-override "${raw}". Use slug='{"adapterType":"...","adapterConfig":{}}'.`);
     }
     const slug = raw.slice(0, separator).trim();
-    const name = raw.slice(separator + 1).trim();
-    if (!slug || !name) {
-      throw new Error(`Invalid --name-override "${raw}". Use slug=name.`);
+    const json = raw.slice(separator + 1).trim();
+    if (!slug || !json) {
+      throw new Error(`Invalid --adapter-override "${raw}". Use slug='{"adapterType":"...","adapterConfig":{}}'.`);
     }
-    result[slug] = name;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(json);
+    } catch (error) {
+      throw new Error(`Invalid --adapter-override JSON for "${slug}": ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error(`Invalid --adapter-override for "${slug}". Expected an object.`);
+    }
+    const override = parsed as NonNullable<CatalogTeamInstallOptions["adapterOverrides"]>[string];
+    if (typeof override.adapterType !== "string" || override.adapterType.trim().length === 0) {
+      throw new Error(`Invalid --adapter-override for "${slug}". Missing adapterType.`);
+    }
+    result[slug] = override;
   }
   return result;
 }
