@@ -14,6 +14,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { cn, formatDate } from "@/lib/utils";
 import type { CompanyArtifact } from "@/api/artifacts";
+import {
+  ARTIFACT_GROUP_OPTIONS,
+  ARTIFACT_KIND_FILTERS,
+  artifactGroupByLabel,
+} from "@/pages/Artifacts";
 
 /**
  * Storybook coverage for the company Artifacts page. Covers:
@@ -24,7 +29,8 @@ import type { CompanyArtifact } from "@/api/artifacts";
  * screenshots without booting a live backend.
  */
 
-type GroupBy = "none" | "task" | "parent_task";
+type StoryArtifactKindFilter = (typeof ARTIFACT_KIND_FILTERS)[number]["value"];
+type StoryArtifactGroupBy = (typeof ARTIFACT_GROUP_OPTIONS)[number]["value"];
 
 const SAMPLE_IMAGE =
   "data:image/svg+xml;utf8," +
@@ -144,25 +150,6 @@ function ArtifactsGrid({ artifacts }: { artifacts: CompanyArtifact[] }) {
 // grouping controls so Storybook stays useful for visual review.
 // ---------------------------------------------------------------------------
 
-const KIND_FILTERS = [
-  { value: "all", label: "All" },
-  { value: "image", label: "Images" },
-  { value: "video", label: "Videos" },
-  { value: "document", label: "Documents" },
-  { value: "text", label: "Text" },
-  { value: "file", label: "Files" },
-] as const;
-
-const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
-  { value: "none", label: "None" },
-  { value: "task", label: "Task" },
-  { value: "parent_task", label: "Parent task" },
-];
-
-function groupByLabel(value: GroupBy) {
-  return GROUP_OPTIONS.find((option) => option.value === value)?.label ?? "None";
-}
-
 /**
  * Toolbar replica matching the existing Artifacts page (search + kind filters)
  * with the group-by icon control placed before the filter chips.
@@ -177,10 +164,10 @@ function ArtifactsToolbar({
 }: {
   query: string;
   onQueryChange: (value: string) => void;
-  kind: (typeof KIND_FILTERS)[number]["value"];
-  onKindChange: (value: (typeof KIND_FILTERS)[number]["value"]) => void;
-  groupBy: GroupBy;
-  onGroupByChange: (value: GroupBy) => void;
+  kind: StoryArtifactKindFilter;
+  onKindChange: (value: StoryArtifactKindFilter) => void;
+  groupBy: StoryArtifactGroupBy;
+  onGroupByChange: (value: StoryArtifactGroupBy) => void;
 }) {
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -214,14 +201,14 @@ function ArtifactsToolbar({
               size="icon"
               className={cn("h-8 w-8 shrink-0", groupBy !== "none" && "bg-accent")}
               title="Group artifacts"
-              aria-label={`Group artifacts (currently ${groupByLabel(groupBy)})`}
+              aria-label={`Group artifacts (currently ${artifactGroupByLabel(groupBy)})`}
             >
               <Layers className="h-3.5 w-3.5" aria-hidden="true" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-44">
             <DropdownMenuLabel>Group by</DropdownMenuLabel>
-            {GROUP_OPTIONS.map(({ value, label }) => (
+            {ARTIFACT_GROUP_OPTIONS.map(({ value, label }) => (
               <DropdownMenuItem
                 key={value}
                 aria-selected={groupBy === value}
@@ -236,7 +223,7 @@ function ArtifactsToolbar({
         </DropdownMenu>
 
         <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Filter artifacts by type">
-          {KIND_FILTERS.map((filter) => (
+          {ARTIFACT_KIND_FILTERS.map((filter) => (
             <button
               key={filter.value}
               type="button"
@@ -261,7 +248,7 @@ function ArtifactsToolbar({
 
 interface MockGroup {
   id: string;
-  groupBy: Exclude<GroupBy, "none">;
+  groupBy: Exclude<StoryArtifactGroupBy, "none">;
   issueIdentifier: string;
   issueTitle: string;
   count: number;
@@ -502,8 +489,8 @@ type Story = StoryObj;
 export const Grid: Story = {
   render: () => {
     const [query, setQuery] = useState("");
-    const [kind, setKind] = useState<(typeof KIND_FILTERS)[number]["value"]>("all");
-    const [groupBy, setGroupBy] = useState<GroupBy>("none");
+    const [kind, setKind] = useState<StoryArtifactKindFilter>("all");
+    const [groupBy, setGroupBy] = useState<StoryArtifactGroupBy>("none");
     return (
       <div className="mx-auto w-full max-w-6xl space-y-5 p-6">
         <ArtifactsToolbar
@@ -528,8 +515,8 @@ export const Grid: Story = {
 export const GroupedByTask: Story = {
   render: () => {
     const [query, setQuery] = useState("");
-    const [kind, setKind] = useState<(typeof KIND_FILTERS)[number]["value"]>("all");
-    const [groupBy, setGroupBy] = useState<GroupBy>("task");
+    const [kind, setKind] = useState<StoryArtifactKindFilter>("all");
+    const [groupBy, setGroupBy] = useState<StoryArtifactGroupBy>("task");
     return (
       <div className="mx-auto w-full max-w-6xl space-y-5 p-6">
         <ArtifactsToolbar
@@ -557,8 +544,8 @@ export const GroupedByTask: Story = {
 export const GroupedByParentTask: Story = {
   render: () => {
     const [query, setQuery] = useState("");
-    const [kind, setKind] = useState<(typeof KIND_FILTERS)[number]["value"]>("all");
-    const [groupBy, setGroupBy] = useState<GroupBy>("parent_task");
+    const [kind, setKind] = useState<StoryArtifactKindFilter>("all");
+    const [groupBy, setGroupBy] = useState<StoryArtifactGroupBy>("parent_task");
     return (
       <div className="mx-auto w-full max-w-6xl space-y-5 p-6">
         <ArtifactsToolbar
@@ -587,8 +574,8 @@ export const GroupedByParentTask: Story = {
 export const SelectedStack: Story = {
   render: () => {
     const [query, setQuery] = useState("");
-    const [kind, setKind] = useState<(typeof KIND_FILTERS)[number]["value"]>("all");
-    const [groupBy, setGroupBy] = useState<GroupBy>("task");
+    const [kind, setKind] = useState<StoryArtifactKindFilter>("all");
+    const [groupBy, setGroupBy] = useState<StoryArtifactGroupBy>("task");
     return (
       <div className="mx-auto w-full max-w-6xl space-y-5 p-6">
         <ArtifactsToolbar
@@ -637,8 +624,8 @@ export const MobileGrouping: Story = {
   parameters: { viewport: { defaultViewport: "mobile" } },
   render: () => {
     const [query, setQuery] = useState("");
-    const [kind, setKind] = useState<(typeof KIND_FILTERS)[number]["value"]>("all");
-    const [groupBy, setGroupBy] = useState<GroupBy>("task");
+    const [kind, setKind] = useState<StoryArtifactKindFilter>("all");
+    const [groupBy, setGroupBy] = useState<StoryArtifactGroupBy>("task");
     return (
       <div className="mx-auto w-full max-w-md space-y-5 p-4">
         <ArtifactsToolbar

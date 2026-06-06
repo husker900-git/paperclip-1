@@ -29,7 +29,7 @@ import { Button } from "@/components/ui/button";
 const ARTIFACTS_PAGE_SIZE = 30;
 const SEARCH_DEBOUNCE_MS = 250;
 
-const KIND_FILTERS: { value: ArtifactKindFilter; label: string }[] = [
+export const ARTIFACT_KIND_FILTERS: { value: ArtifactKindFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "image", label: "Images" },
   { value: "video", label: "Videos" },
@@ -38,13 +38,13 @@ const KIND_FILTERS: { value: ArtifactKindFilter; label: string }[] = [
   { value: "file", label: "Files" },
 ];
 
-const GROUP_OPTIONS: { value: ArtifactGroupBy; label: string }[] = [
+export const ARTIFACT_GROUP_OPTIONS: { value: ArtifactGroupBy; label: string }[] = [
   { value: "none", label: "None" },
   { value: "task", label: "Task" },
   { value: "parent_task", label: "Parent task" },
 ];
 
-const KIND_VALUES = new Set(KIND_FILTERS.map((filter) => filter.value));
+const KIND_VALUES = new Set(ARTIFACT_KIND_FILTERS.map((filter) => filter.value));
 
 function parseGroupBy(value: string | null): ArtifactGroupBy {
   if (value === "none" || value === "task" || value === "parent_task") return value;
@@ -57,8 +57,8 @@ function parseKind(value: string | null): ArtifactKindFilter {
     : "all";
 }
 
-function groupByLabel(value: ArtifactGroupBy): string {
-  return GROUP_OPTIONS.find((option) => option.value === value)?.label ?? "None";
+export function artifactGroupByLabel(value: ArtifactGroupBy): string {
+  return ARTIFACT_GROUP_OPTIONS.find((option) => option.value === value)?.label ?? "None";
 }
 
 export function Artifacts() {
@@ -276,7 +276,7 @@ export function Artifacts() {
                 type="button"
                 variant="outline"
                 size="icon"
-                aria-label={`Group artifacts (currently ${groupByLabel(groupBy)})`}
+                aria-label={`Group artifacts (currently ${artifactGroupByLabel(groupBy)})`}
                 title="Group artifacts"
                 data-testid="artifact-group-control"
                 data-group-by={groupBy}
@@ -287,7 +287,7 @@ export function Artifacts() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
               <DropdownMenuLabel>Group by</DropdownMenuLabel>
-              {GROUP_OPTIONS.map((option) => (
+              {ARTIFACT_GROUP_OPTIONS.map((option) => (
                 <DropdownMenuItem
                   key={option.value}
                   data-testid={`artifact-group-option-${option.value}`}
@@ -303,7 +303,7 @@ export function Artifacts() {
           </DropdownMenu>
 
           <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Filter artifacts by type">
-            {KIND_FILTERS.map((filter) => (
+            {ARTIFACT_KIND_FILTERS.map((filter) => (
               <button
                 key={filter.value}
                 type="button"
