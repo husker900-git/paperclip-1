@@ -39,6 +39,16 @@ describe("nextCronFires", () => {
     ]);
   });
 
+  it("uses OR semantics when day-of-month and day-of-week are both restricted", () => {
+    const after = new Date("2026-06-09T10:00:00Z");
+    const fires = nextCronFires("0 9 15 * 5", 3, { after, timeZone: "UTC" });
+    expect(fires.map((d) => d.toISOString())).toEqual([
+      "2026-06-12T09:00:00.000Z",
+      "2026-06-15T09:00:00.000Z",
+      "2026-06-19T09:00:00.000Z",
+    ]);
+  });
+
   it("interprets cron fields in the trigger timezone", () => {
     // 14:00 in New York (EDT, UTC-4 in June) is 18:00 UTC.
     const after = new Date("2026-06-09T10:00:00Z");

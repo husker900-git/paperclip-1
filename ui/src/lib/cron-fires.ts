@@ -25,6 +25,8 @@ interface ParsedCron {
   daysOfMonth: number[];
   months: number[];
   daysOfWeek: number[];
+  daysOfMonthWildcard: boolean;
+  daysOfWeekWildcard: boolean;
 }
 
 interface FieldSpec {
@@ -101,18 +103,26 @@ function assertBounds(value: number, spec: FieldSpec): void {
   }
 }
 
+function coversEntireField(values: number[], spec: FieldSpec): boolean {
+  return values.length === spec.max - spec.min + 1 && values[0] === spec.min && values.at(-1) === spec.max;
+}
+
 /** Parse a 5-field cron expression. Returns null when it can't be parsed. */
 export function parseCronExpression(expression: string | null | undefined): ParsedCron | null {
   if (!expression) return null;
   const tokens = expression.trim().split(/\s+/);
   if (tokens.length !== 5) return null;
   try {
+    const daysOfMonth = parseField(tokens[2]!, FIELD_SPECS[2]!);
+    const daysOfWeek = parseField(tokens[4]!, FIELD_SPECS[4]!);
     return {
       minutes: parseField(tokens[0]!, FIELD_SPECS[0]!),
       hours: parseField(tokens[1]!, FIELD_SPECS[1]!),
-      daysOfMonth: parseField(tokens[2]!, FIELD_SPECS[2]!),
+      daysOfMonth,
       months: parseField(tokens[3]!, FIELD_SPECS[3]!),
-      daysOfWeek: parseField(tokens[4]!, FIELD_SPECS[4]!),
+      daysOfWeek,
+      daysOfMonthWildcard: coversEntireField(daysOfMonth, FIELD_SPECS[2]!),
+      daysOfWeekWildcard: coversEntireField(daysOfWeek, FIELD_SPECS[4]!),
     };
   } catch {
     return null;
@@ -154,12 +164,18 @@ function getZonedMinuteParts(date: Date, timeZone: string): ZonedParts {
 }
 
 function matches(cron: ParsedCron, parts: ZonedParts): boolean {
+  const dayOfMonthMatches = cron.daysOfMonth.includes(parts.day);
+  const dayOfWeekMatches = cron.daysOfWeek.includes(parts.weekday);
+  const dayMatches =
+    !cron.daysOfMonthWildcard && !cron.daysOfWeekWildcard
+      ? dayOfMonthMatches || dayOfWeekMatches
+      : dayOfMonthMatches && dayOfWeekMatches;
+
   return (
     cron.minutes.includes(parts.minute) &&
     cron.hours.includes(parts.hour) &&
-    cron.daysOfMonth.includes(parts.day) &&
     cron.months.includes(parts.month) &&
-    cron.daysOfWeek.includes(parts.weekday)
+    dayMatches
   );
 }
 
