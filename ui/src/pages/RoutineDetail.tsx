@@ -787,7 +787,8 @@ export function RoutineDetail() {
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <textarea
               ref={titleInputRef}
-              className="min-w-0 flex-1 resize-none overflow-hidden bg-transparent text-base font-semibold outline-none placeholder:text-muted-foreground/50"
+              data-autosize-title
+              className="min-w-0 flex-1 resize-none overflow-hidden bg-transparent text-base font-semibold leading-7 outline-none placeholder:text-muted-foreground/50"
               placeholder="Routine title"
               rows={1}
               value={editDraft.title}
