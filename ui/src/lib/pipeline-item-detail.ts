@@ -113,6 +113,28 @@ export function itemHasChangedNotice(item: Pick<PipelineCase, "fields"> & {
   return null;
 }
 
+export function eventsHaveUnacknowledgedDrift(events: PipelineCaseEvent[]) {
+  const latestAcknowledgedAt = events
+    .filter((event) => event.type === "drift_acknowledged")
+    .map((event) => new Date(event.createdAt).getTime())
+    .filter((time) => Number.isFinite(time))
+    .reduce((latest, time) => Math.max(latest, time), 0);
+
+  return events.some((event) => {
+    if (event.type !== "upstream_drift") return false;
+    const createdAt = new Date(event.createdAt).getTime();
+    return Number.isFinite(createdAt) && createdAt > latestAcknowledgedAt;
+  });
+}
+
+export function changedNoticeFromEvents(events: PipelineCaseEvent[]) {
+  if (!eventsHaveUnacknowledgedDrift(events)) return null;
+  return {
+    title: "This changed",
+    body: "Upstream work changed after this item was created. Review the latest details before continuing.",
+  };
+}
+
 function stageName(event: Pick<PipelineCaseEvent, "fromStageId" | "toStageId">, stages: StageLookup, side: "from" | "to") {
   const stageId = side === "from" ? event.fromStageId : event.toStageId;
   return stageNameFromLookup(stages, stageId ?? undefined);
@@ -159,6 +181,7 @@ export function formatPipelineItemEvent(event: PipelineCaseEvent, stages?: Stage
   if (kind === "blockers_set") return "Waiting items updated.";
   if (kind === "blockers_resolved") return "Waiting items cleared.";
   if (kind === "children_terminal") return "Built-from items completed.";
+  if (kind === "drift_acknowledged") return "Upstream change acknowledged.";
   if (kind === "automation_executed") return "Automation completed.";
   if (kind === "automation_failed") return "Automation needs attention.";
   if (kind === "claimed") return "Work started.";

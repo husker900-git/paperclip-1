@@ -184,7 +184,14 @@ export async function listPipelineAttention(
       eq(pipelineCaseEvents.type, "upstream_drift"),
       eq(pipelineCases.companyId, input.companyId),
       isNull(pipelineCases.terminalKind),
-      sql`${pipelineCaseEvents.createdAt} > ${pipelineCases.updatedAt}`,
+      sql`not exists (
+        select 1
+        from pipeline_case_events ack
+        where ack.company_id = ${pipelineCaseEvents.companyId}
+          and ack.case_id = ${pipelineCaseEvents.caseId}
+          and ack.type = 'drift_acknowledged'
+          and ack.created_at > ${pipelineCaseEvents.createdAt}
+      )`,
     ))
     .orderBy(asc(pipelineCaseEvents.caseId), desc(pipelineCaseEvents.createdAt))
     .limit(limit);

@@ -196,7 +196,7 @@ describeEmbeddedPostgres("pipeline aggregation routes", () => {
       .expect(201);
     await board
       .patch(`/api/cases/${upstream.body.case.id}`)
-      .send({ summary: "Scope changed", expectedVersion: 1 })
+      .send({ fields: { releaseNotes: "Scope changed" }, expectedVersion: 1 })
       .expect(200);
 
     const boardFeed = await board.get(`/api/companies/${company.id}/pipelines-attention`).expect(200);
@@ -240,10 +240,17 @@ describeEmbeddedPostgres("pipeline aggregation routes", () => {
     const agentFeed = await asAgent.get(`/api/companies/${company.id}/pipelines-attention`).expect(200);
     expect(agentFeed.body.reviews.map((entry: { case: { id: string } }) => entry.case.id)).toEqual([anyReview.body.case.id]);
 
-    // Touching the dependent case resolves the drift notice.
+    // Touching the dependent case does not resolve the drift notice; it must be acknowledged.
     await board
       .patch(`/api/cases/${dependent.body.case.id}`)
       .send({ title: "Dependent draft v2", expectedVersion: 1 })
+      .expect(200);
+    const stillDriftedFeed = await board.get(`/api/companies/${company.id}/pipelines-attention`).expect(200);
+    expect(stillDriftedFeed.body.headsUp).toHaveLength(1);
+
+    await board
+      .post(`/api/cases/${dependent.body.case.id}/acknowledge-drift`)
+      .send({ expectedVersion: 1 })
       .expect(200);
     const resolvedFeed = await board.get(`/api/companies/${company.id}/pipelines-attention`).expect(200);
     expect(resolvedFeed.body.headsUp).toEqual([]);

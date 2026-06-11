@@ -177,11 +177,11 @@ describeEmbeddedPostgres("pipeline routes", () => {
       .expect(200);
     await http
       .post(`/api/cases/${caseId}/resolve-suggestion`)
-      .send({ suggestionId: suggestion.body.suggestion.id, resolution: "accept", expectedVersion: 2 })
+      .send({ suggestionId: suggestion.body.suggestion.id, resolution: "accept", expectedVersion: 1 })
       .expect(200);
     await http.get(`/api/cases/${caseId}/events`).expect(200);
     await http.get(`/api/companies/${company.id}/review-cases`).expect(200);
-    await http.post(`/api/cases/${caseId}/review`).send({ decision: "approve", expectedVersion: 3 }).expect(200);
+    await http.post(`/api/cases/${caseId}/review`).send({ decision: "approve", expectedVersion: 2 }).expect(200);
 
     const reviewCase = await http
       .post(`/api/pipelines/${pipelineId}/cases`)
@@ -1253,7 +1253,7 @@ describeEmbeddedPostgres("pipeline routes", () => {
       caseIds.push(created.body.case.id);
     }
     for (const staleCaseId of caseIds.slice(0, 3)) {
-      await http.patch(`/api/cases/${staleCaseId}`).send({ title: "Stale before bulk", expectedVersion: 2 }).expect(200);
+      await http.patch(`/api/cases/${staleCaseId}`).send({ fields: { staleBeforeBulk: true }, expectedVersion: 2 }).expect(200);
     }
 
     const bulk = await http
@@ -1278,9 +1278,9 @@ describeEmbeddedPostgres("pipeline routes", () => {
     const http = request(app(boardActor));
     const pipelineRes = await http.post(`/api/companies/${company.id}/pipelines`).send({ key: "conflict", name: "Conflict" }).expect(201);
     const caseRes = await http.post(`/api/pipelines/${pipelineRes.body.id}/cases`).send({ caseKey: "conflict", title: "Conflict" }).expect(201);
-    await http.patch(`/api/cases/${caseRes.body.case.id}`).send({ title: "Updated", expectedVersion: 1 }).expect(200);
+    await http.patch(`/api/cases/${caseRes.body.case.id}`).send({ fields: { body: "Updated" }, expectedVersion: 1 }).expect(200);
 
-    const res = await http.patch(`/api/cases/${caseRes.body.case.id}`).send({ title: "Stale", expectedVersion: 1 });
+    const res = await http.patch(`/api/cases/${caseRes.body.case.id}`).send({ fields: { body: "Stale" }, expectedVersion: 1 });
 
     expect(res.status).toBe(409);
     expect(res.body.code).toBe("version_conflict");

@@ -427,6 +427,11 @@ export const pipelinesApi = {
       leaseToken?: string | null;
     },
   ) => api.patch<{ case: PipelineCase; event?: PipelineCaseEvent | null } | PipelineCase>(`/cases/${caseId}`, data),
+  acknowledgeDrift: (caseId: string, data?: { expectedVersion?: number }) =>
+    api.post<{ case: PipelineCase; event: PipelineCaseEvent | null; acknowledged: boolean }>(
+      `/cases/${caseId}/acknowledge-drift`,
+      data ?? {},
+    ),
   resolveSuggestion: (
     caseId: string,
     data: {

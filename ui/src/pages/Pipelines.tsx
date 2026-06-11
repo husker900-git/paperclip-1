@@ -64,6 +64,7 @@ import {
   formatPipelineItemEvent,
   getPendingTransitionBannerState,
   humanizePipelineItemStatus,
+  changedNoticeFromEvents,
   itemHasChangedNotice,
 } from "../lib/pipeline-item-detail";
 import { hasBlockingShortcutDialog, isKeyboardShortcutTextInputTarget } from "../lib/keyboardShortcuts";
@@ -1555,13 +1556,7 @@ export function PipelineItemDetailView({ pipelineId, caseId }: { pipelineId: str
   });
 
   const acknowledgeChange = useMutation({
-    mutationFn: () => pipelinesApi.updateCase(caseId, {
-      expectedVersion: detail?.case.version,
-      fields: {
-        ...(detail?.case.fields ?? {}),
-        changeAcknowledgedAt: new Date().toISOString(),
-      },
-    }),
+    mutationFn: () => pipelinesApi.acknowledgeDrift(caseId, { expectedVersion: detail?.case.version }),
     onSuccess: async () => {
       await invalidateItem();
       pushToast({ title: "Change acknowledged", tone: "success" });
@@ -1598,10 +1593,10 @@ export function PipelineItemDetailView({ pipelineId, caseId }: { pipelineId: str
 
   const itemFields = displayPipelineItemFields(detail.case.fields);
   const banner = getPendingTransitionBannerState(detail.case, stageLookup);
-  const changedNotice = itemHasChangedNotice(detail.case);
   const statusLabel = humanizePipelineItemStatus(detail.case.terminalKind ?? detail.stage.kind);
   const childRows = children.data ?? [];
   const eventRows = events.data?.items ?? [];
+  const changedNotice = itemHasChangedNotice(detail.case) ?? changedNoticeFromEvents(eventRows);
   const primaryAction = conversationLink
     ? (
         <Button asChild>

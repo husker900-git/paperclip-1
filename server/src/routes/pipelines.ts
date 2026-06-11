@@ -135,6 +135,9 @@ const resolveSuggestionSchema = z.object({
   reason: z.string().max(4_000).nullable().optional(),
   leaseToken: z.string().uuid().nullable().optional(),
 });
+const acknowledgeDriftSchema = z.object({
+  expectedVersion: z.number().int().positive().optional(),
+});
 const reviewEditsSchema = z.object({
   title: z.string().trim().min(1).max(500).optional(),
   summary: z.string().max(8_000).nullable().optional(),
@@ -991,6 +994,18 @@ export function pipelineRoutes(db: Db, options: Parameters<typeof pipelineServic
       expectedVersion: req.body.expectedVersion,
       reason: req.body.reason,
       leaseToken: req.body.leaseToken,
+      actor,
+    }));
+  });
+
+  router.post("/cases/:caseId/acknowledge-drift", validate(acknowledgeDriftSchema), async (req, res) => {
+    const caseId = req.params.caseId as string;
+    const companyId = await assertCaseAccess(db, req, caseId);
+    const actor = actorForMutation(req);
+    res.json(await svc.acknowledgeDrift({
+      companyId,
+      caseId,
+      expectedVersion: req.body.expectedVersion,
       actor,
     }));
   });

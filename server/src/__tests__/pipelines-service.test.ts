@@ -235,7 +235,7 @@ describeEmbeddedPostgres("pipelineService", () => {
     await svc.patchCaseContent({
       companyId: company.id,
       caseId: created.case.id,
-      title: "Patched",
+      fields: { body: "Patched" },
       expectedVersion: 1,
       actor: userActor,
     });
@@ -245,7 +245,7 @@ describeEmbeddedPostgres("pipelineService", () => {
       svc.patchCaseContent({
         companyId: company.id,
         caseId: created.case.id,
-        title: "Stale",
+        fields: { body: "Stale" },
         expectedVersion: 1,
         actor: userActor,
       }),
@@ -632,7 +632,7 @@ describeEmbeddedPostgres("pipelineService", () => {
     expect(moved.case.version).toBe(2);
   });
 
-  it("posts upstream drift notices to active dependent work issues only", async () => {
+  it("posts upstream drift notices to active dependent work issues only for material field changes", async () => {
     const { company, pipeline } = await seedPipeline();
     const upstream = await svc.ingestCase({
       companyId: company.id,
@@ -670,10 +670,19 @@ describeEmbeddedPostgres("pipelineService", () => {
       title: "Conversation issue",
     });
 
-    const updated = await svc.patchCaseContent({
+    const metadataOnly = await svc.patchCaseContent({
       companyId: company.id,
       caseId: upstream.case.id,
       title: "Draft v2",
+      expectedVersion: 1,
+      actor: userActor,
+    });
+    expect(metadataOnly.version).toBe(1);
+
+    const updated = await svc.patchCaseContent({
+      companyId: company.id,
+      caseId: upstream.case.id,
+      fields: { releaseNotes: "v2" },
       expectedVersion: 1,
       actor: userActor,
     });
@@ -786,6 +795,149 @@ describeEmbeddedPostgres("pipelineService", () => {
     expect(await eventCount(upstream.case.id)).toBe(beforeEvents);
     const comments = await db.select().from(issueComments).where(eq(issueComments.issueId, workIssue.id));
     expect(comments).toHaveLength(0);
+  });
+
+  it("requires terminal children and matching expected child count before gated stage exit", async () => {
+    const company = await seedCompany();
+    const pipeline = await svc.createPipeline({
+      companyId: company.id,
+      key: "assembly-gate",
+      name: "Assembly gate",
+      actor: userActor,
+      stages: [
+        { key: "assembly", name: "Assembly", kind: "working", config: { requireChildrenTerminal: true } },
+        { key: "done", name: "Done", kind: "done" },
+        { key: "cancelled", name: "Cancelled", kind: "cancelled" },
+      ],
+    });
+    const parent = await svc.ingestCase({
+      companyId: company.id,
+      pipelineId: pipeline.id,
+      caseKey: "parent",
+      title: "Parent",
+      fields: { expectedChildren: 2 },
+      actor: userActor,
+    });
+    const child = await svc.ingestCase({
+      companyId: company.id,
+      pipelineId: pipeline.id,
+      caseKey: "child",
+      title: "Child",
+      parentCaseId: parent.case.id,
+      actor: userActor,
+    });
+
+    await expect(svc.transitionCase({
+      companyId: company.id,
+      caseId: parent.case.id,
+      toStageKey: "done",
+      expectedVersion: 1,
+      actor: userActor,
+    })).rejects.toMatchObject({ status: 409, details: { code: "expected_children_mismatch" } });
+
+    await svc.patchCaseContent({
+      companyId: company.id,
+      caseId: parent.case.id,
+      fields: { expectedChildren: 1 },
+      expectedVersion: 1,
+      actor: userActor,
+    });
+    await expect(svc.transitionCase({
+      companyId: company.id,
+      caseId: parent.case.id,
+      toStageKey: "done",
+      expectedVersion: 2,
+      actor: userActor,
+    })).rejects.toMatchObject({
+      status: 409,
+      details: { code: "children_not_terminal", child: expect.objectContaining({ title: "Child" }) },
+    });
+
+    await svc.transitionCase({
+      companyId: company.id,
+      caseId: child.case.id,
+      toStageKey: "done",
+      expectedVersion: 1,
+      actor: userActor,
+    });
+    const moved = await svc.transitionCase({
+      companyId: company.id,
+      caseId: parent.case.id,
+      toStageKey: "done",
+      expectedVersion: 2,
+      actor: userActor,
+    });
+    expect(moved.case.terminalKind).toBe("done");
+  });
+
+  it("requires explicit drift acknowledgement before gated stage exit", async () => {
+    const company = await seedCompany();
+    const pipeline = await svc.createPipeline({
+      companyId: company.id,
+      key: "drift-gate",
+      name: "Drift gate",
+      actor: userActor,
+      stages: [
+        { key: "assembly", name: "Assembly", kind: "working", config: { requireNoUnresolvedDrift: true } },
+        { key: "done", name: "Done", kind: "done" },
+        { key: "cancelled", name: "Cancelled", kind: "cancelled" },
+      ],
+    });
+    const upstream = await svc.ingestCase({
+      companyId: company.id,
+      pipelineId: pipeline.id,
+      caseKey: "release",
+      title: "Release",
+      actor: userActor,
+    });
+    const dependent = await svc.ingestCase({
+      companyId: company.id,
+      pipelineId: pipeline.id,
+      caseKey: "blog",
+      title: "Blog",
+      blockedByCaseIds: [upstream.case.id],
+      actor: userActor,
+    });
+    await svc.transitionCase({
+      companyId: company.id,
+      caseId: upstream.case.id,
+      toStageKey: "done",
+      expectedVersion: 1,
+      actor: userActor,
+    });
+    await svc.patchCaseContent({
+      companyId: company.id,
+      caseId: upstream.case.id,
+      fields: { releaseNotes: "changed" },
+      expectedVersion: 2,
+      actor: userActor,
+    });
+
+    await expect(svc.transitionCase({
+      companyId: company.id,
+      caseId: dependent.case.id,
+      toStageKey: "done",
+      expectedVersion: 1,
+      actor: userActor,
+    })).rejects.toMatchObject({ status: 409, details: { code: "unresolved_drift" } });
+
+    const ack = await svc.acknowledgeDrift({
+      companyId: company.id,
+      caseId: dependent.case.id,
+      expectedVersion: 1,
+      actor: userActor,
+    });
+    expect(ack.acknowledged).toBe(true);
+    expect(ack.event?.type).toBe("drift_acknowledged");
+
+    const moved = await svc.transitionCase({
+      companyId: company.id,
+      caseId: dependent.case.id,
+      toStageKey: "done",
+      expectedVersion: 1,
+      actor: userActor,
+    });
+    expect(moved.case.terminalKind).toBe("done");
   });
 
   it("resolves in-batch forward blocker case keys", async () => {
@@ -1071,6 +1223,54 @@ describeEmbeddedPostgres("pipelineService", () => {
     expect(rootEvents.map((event) => event.type)).toEqual(["ingested", "children_terminal", "transitioned"]);
   });
 
+  it("dispatches stage-entry automation created by cascaded child-terminal auto-advance", async () => {
+    const company = await seedCompany();
+    const routine = await seedRoutine(company.id, "Assembly on enter");
+    const pipeline = await svc.createPipeline({
+      companyId: company.id,
+      key: "cascade-automation",
+      name: "Cascade automation",
+      actor: userActor,
+      stages: [
+        { key: "intake", name: "Intake", kind: "open", config: { autoAdvanceOnChildrenTerminal: "assembly" } },
+        { key: "assembly", name: "Assembly", kind: "working", config: { onEnter: { type: "run_routine", routineId: routine.id } } },
+        { key: "done", name: "Done", kind: "done" },
+        { key: "cancelled", name: "Cancelled", kind: "cancelled" },
+      ],
+    });
+    const root = await svc.ingestCase({
+      companyId: company.id,
+      pipelineId: pipeline.id,
+      caseKey: "root",
+      title: "Root",
+      actor: userActor,
+    });
+    const child = await svc.ingestCase({
+      companyId: company.id,
+      pipelineId: pipeline.id,
+      caseKey: "child",
+      title: "Child",
+      parentCaseId: root.case.id,
+      actor: userActor,
+    });
+
+    await svc.transitionCase({
+      companyId: company.id,
+      caseId: child.case.id,
+      toStageKey: "done",
+      expectedVersion: 1,
+      actor: userActor,
+    });
+
+    const [freshRoot] = await db.select().from(pipelineCases).where(eq(pipelineCases.id, root.case.id));
+    const assembly = pipeline.stages.find((stage) => stage.key === "assembly")!;
+    expect(freshRoot!.stageId).toBe(assembly.id);
+    const ledgers = await db.select().from(pipelineAutomationExecutions).where(eq(pipelineAutomationExecutions.caseId, root.case.id));
+    expect(ledgers).toHaveLength(1);
+    expect(ledgers[0]!).toMatchObject({ status: "succeeded", routineId: routine.id });
+    expect(ledgers[0]!.executionIssueId).toBeTruthy();
+  });
+
   it("normalizes legacy reviewerKind and enforces configured approvers", async () => {
     const company = await seedCompany();
     const legacyHuman = await svc.createPipeline({
@@ -1194,6 +1394,71 @@ describeEmbeddedPostgres("pipelineService", () => {
     expect(approved.case.terminalKind).toBe("done");
   });
 
+  it("records approved case versions and rejects publish after post-review material changes", async () => {
+    const company = await seedCompany();
+    const pipeline = await svc.createPipeline({
+      companyId: company.id,
+      key: "revision-pinned-review",
+      name: "Revision pinned review",
+      actor: userActor,
+      stages: [
+        { key: "drafting", name: "Drafting", kind: "working" },
+        {
+          key: "review",
+          name: "Review",
+          kind: "review",
+          config: { approveToStageKey: "publishing", rejectToStageKey: "cancelled" },
+        },
+        { key: "publishing", name: "Publishing", kind: "working" },
+        { key: "done", name: "Done", kind: "done" },
+        { key: "cancelled", name: "Cancelled", kind: "cancelled" },
+      ],
+    });
+    const created = await svc.ingestCase({
+      companyId: company.id,
+      pipelineId: pipeline.id,
+      caseKey: "post",
+      title: "Post",
+      fields: { body: "v1" },
+      actor: userActor,
+    });
+    await svc.transitionCase({
+      companyId: company.id,
+      caseId: created.case.id,
+      toStageKey: "review",
+      expectedVersion: 1,
+      actor: userActor,
+    });
+    const approved = await svc.reviewCase({
+      companyId: company.id,
+      caseId: created.case.id,
+      decision: "approve",
+      expectedVersion: 2,
+      actor: userActor,
+    });
+    expect(approved.case.version).toBe(3);
+    expect(approved.reviewEvent.payload).toMatchObject({
+      decision: "approve",
+      approvedCaseVersion: 2,
+      approvedTransitionVersion: 3,
+    });
+    await svc.patchCaseContent({
+      companyId: company.id,
+      caseId: created.case.id,
+      fields: { body: "v2" },
+      expectedVersion: 3,
+      actor: userActor,
+    });
+
+    await expect(svc.transitionCase({
+      companyId: company.id,
+      caseId: created.case.id,
+      toStageKey: "done",
+      expectedVersion: 4,
+      actor: userActor,
+    })).rejects.toMatchObject({ status: 409, details: { code: "review_outdated", approvedVersion: 3, currentVersion: 4 } });
+  });
+
   it("records suggestion supersede, accept, and dismiss lifecycles", async () => {
     const { company, pipeline } = await seedPipeline();
     const created = await svc.ingestCase({
@@ -1285,7 +1550,8 @@ describeEmbeddedPostgres("pipelineService", () => {
       actor: userActor,
     });
     expect(await eventCount(created.case.id)).toBe(1);
-    await svc.patchCaseContent({ companyId: company.id, caseId: created.case.id, title: "Updated", actor: userActor });
+    const renamed = await svc.patchCaseContent({ companyId: company.id, caseId: created.case.id, title: "Updated", actor: userActor });
+    expect(renamed.version).toBe(1);
     expect(await eventCount(created.case.id)).toBe(2);
     const claimed = await svc.claimCase({ companyId: company.id, caseId: created.case.id, actor: { type: "user", userId: "claimer" } });
     expect(await eventCount(created.case.id)).toBe(3);
@@ -1295,7 +1561,7 @@ describeEmbeddedPostgres("pipelineService", () => {
       companyId: company.id,
       caseId: created.case.id,
       toStageKey: "in_progress",
-      expectedVersion: 2,
+      expectedVersion: 1,
       actor: userActor,
     });
     expect(await eventCount(created.case.id)).toBe(5);

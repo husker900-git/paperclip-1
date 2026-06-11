@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PipelineCase, PipelineCaseEvent, PipelineStage } from "../api/pipelines";
 import {
+  changedNoticeFromEvents,
   displayPipelineItemFields,
   formatPipelineItemEvent,
   getPendingTransitionBannerState,
@@ -79,6 +80,13 @@ describe("pipeline item detail helpers", () => {
     expect(itemHasChangedNotice(item({ fields: { upstreamChanged: true } }))).toMatchObject({ title: "This changed" });
     expect(itemHasChangedNotice(item({ fields: { upstreamDrift: true } }))).toMatchObject({ title: "This changed" });
     expect(itemHasChangedNotice(item({ fields: {} }))).toBeNull();
+    expect(changedNoticeFromEvents([
+      event("upstream_drift", {}, { createdAt: "2026-06-10T12:00:00.000Z" }),
+    ])).toMatchObject({ title: "This changed" });
+    expect(changedNoticeFromEvents([
+      event("upstream_drift", {}, { createdAt: "2026-06-10T12:00:00.000Z" }),
+      event("drift_acknowledged", {}, { createdAt: "2026-06-10T12:01:00.000Z" }),
+    ])).toBeNull();
   });
 
   it("formats every supported activity kind as prose", () => {
@@ -92,6 +100,7 @@ describe("pipeline item detail helpers", () => {
       [event("case.reviewed", { decision: "request_changes" }), "Review requested changes."],
       [event("case.reviewed", { decision: "drop" }), "Review removed this item."],
       [event("case.reviewed", { decision: "approve" }), "Review approved this item."],
+      [event("drift_acknowledged"), "Upstream change acknowledged."],
       [event("case.unknown_kind"), "Activity recorded."],
     ];
 
