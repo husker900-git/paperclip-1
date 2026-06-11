@@ -910,13 +910,18 @@ function deriveImportedSkillSource(
         : null);
     const [owner, repoName] = (repo ?? "").split("/");
     if (repo && owner && repoName) {
+      const sourceKind = owner === "paperclipai"
+        && repoName === "paperclip"
+        && canonicalKey?.startsWith("paperclipai/paperclip/")
+        ? "paperclip_bundled"
+        : "github";
       return {
         sourceType: "github",
         sourceLocator: url,
         sourceRef: commit,
         metadata: {
           ...(canonicalKey ? { skillKey: canonicalKey } : {}),
-          sourceKind: "github",
+          sourceKind,
           ...(sourceHostname !== "github.com" ? { hostname: sourceHostname } : {}),
           owner,
           repo: repoName,
