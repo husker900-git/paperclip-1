@@ -223,7 +223,7 @@ export function OverviewSection() {
         <div className="flex items-center justify-end">
           {routine.descriptionDocument ? (
             <DocumentAnnotationsCountChip
-              issueId=""
+              issueId={routine.id}
               docKey="description"
               target={{ kind: "routine", routineId: routine.id, documentKey: "description" }}
               panelOpen={descriptionAnnotationsOpen}
