@@ -17,6 +17,9 @@ export const envBindingSecretRefSchema = z.object({
   type: z.literal("secret_ref"),
   secretId: z.string().uuid(),
   version: z.union([z.literal("latest"), z.number().int().positive()]).optional(),
+  // Operator-fixed argv for dynamic (host-command) generators, captured at
+  // attach time. Never agent-supplied. Optional/empty for static secrets.
+  staticArgv: z.array(z.string().max(4096)).max(64).optional(),
 });
 
 // Backward-compatible union that accepts legacy inline values.
@@ -35,6 +38,17 @@ export const dynamicSecretCommandSchema = z.object({
 }).strict();
 
 export const staticArgvSchema = z.array(z.string().max(4096)).max(64).default([]);
+
+// Operator dry-run of a dynamic (host-command) generator before saving a
+// secret or binding. The resolved value is never returned to the caller —
+// only a pass/fail signal plus non-sensitive metadata.
+export const testDynamicSecretCommandSchema = z.object({
+  command: z.string().trim().min(1).max(2048),
+  ttlSeconds: z.number().int().min(1).max(86_400).optional(),
+  staticArgv: staticArgvSchema,
+}).strict();
+
+export type TestDynamicSecretCommand = z.infer<typeof testDynamicSecretCommandSchema>;
 
 export const createSecretSchema = z.object({
   name: z.string().min(1),

@@ -31,6 +31,10 @@ export interface EnvSecretRefBinding {
   type: "secret_ref";
   secretId: string;
   version?: SecretVersionSelector;
+  // Operator-fixed positional arguments passed to a dynamic (host-command)
+  // generator at injection time. Never agent-supplied. Ignored for
+  // non-dynamic secrets.
+  staticArgv?: string[];
 }
 
 // Backward-compatible: legacy plaintext string values are still accepted.

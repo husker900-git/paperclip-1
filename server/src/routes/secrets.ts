@@ -7,12 +7,14 @@ import {
   remoteSecretImportSchema,
   rotateSecretSchema,
   secretProviderConfigDiscoveryPreviewSchema,
+  testDynamicSecretCommandSchema,
   updateSecretProviderConfigSchema,
   updateSecretSchema,
 } from "@paperclipai/shared";
 import { validate } from "../middleware/validate.js";
 import { assertBoard, assertCompanyAccess } from "./authz.js";
-import { logActivity, secretService } from "../services/index.js";
+import { instanceSettingsService, logActivity, secretService } from "../services/index.js";
+import { forbidden } from "../errors.js";
 import { getConfiguredSecretProvider } from "../secrets/configured-provider.js";
 
 export function secretRoutes(db: Db) {
@@ -304,6 +306,37 @@ export function secretRoutes(db: Db) {
 
     res.status(201).json(created);
   });
+
+  // Operator-only dry-run of a dynamic (host-command) generator before saving.
+  // Gated behind the experimental flag and the board scope. Returns only a
+  // pass/fail signal and non-sensitive metadata — never the generated value.
+  router.post(
+    "/companies/:companyId/secrets/dynamic-command/test",
+    validate(testDynamicSecretCommandSchema),
+    async (req, res) => {
+      assertBoard(req);
+      const companyId = req.params.companyId as string;
+      assertCompanyAccess(req, companyId);
+      const experimental = await instanceSettingsService(db).getExperimental();
+      if (experimental.enableDynamicSecrets !== true) {
+        throw forbidden("Dynamic secrets are not enabled for this instance.");
+      }
+      const result = await svc.testDynamicCommand({
+        command: req.body.command,
+        staticArgv: req.body.staticArgv,
+      });
+      await logActivity(db, {
+        companyId,
+        actorType: "user",
+        actorId: req.actor.userId ?? "board",
+        action: "secret.dynamic_command.tested",
+        entityType: "secret",
+        entityId: "dynamic-command-test",
+        details: { ok: result.ok, errorCode: result.errorCode ?? null },
+      });
+      res.json(result);
+    },
+  );
 
   router.post(
     "/companies/:companyId/secrets/remote-import/preview",

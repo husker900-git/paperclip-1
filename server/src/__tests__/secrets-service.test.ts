@@ -340,6 +340,72 @@ console.log("minted-" + count + ":" + process.argv.slice(2).join("|"));
     expect(activities).toHaveLength(0);
   });
 
+  it("dry-runs a dynamic generator without returning the value", async () => {
+    await seedCompany();
+    const svc = secretService(db);
+    const scriptPath = writeGeneratorScript(
+      "dynamic-test-ok",
+      "console.log('minted:' + process.argv.slice(2).join('|'));",
+    );
+
+    const ok = await svc.testDynamicCommand({
+      command: process.execPath,
+      staticArgv: [scriptPath, "--installation", "999"],
+    });
+    expect(ok.ok).toBe(true);
+    expect(ok.posture).toBe("soft");
+    expect(ok.bytes).toBe("minted:--installation|999".length);
+    expect(JSON.stringify(ok)).not.toContain("minted");
+
+    const failing = writeGeneratorScript(
+      "dynamic-test-fail",
+      "process.stderr.write('boom'); process.exit(2);",
+    );
+    const failure = await svc.testDynamicCommand({
+      command: process.execPath,
+      staticArgv: [failing],
+    });
+    expect(failure.ok).toBe(false);
+    expect(failure.posture).toBe("soft");
+    expect(failure.errorCode).toBe("dynamic_secret_command_failed");
+    expect(failure.bytes).toBeUndefined();
+  });
+
+  it("threads operator static argv from env bindings into binding rows", async () => {
+    const companyId = await seedCompany();
+    const svc = secretService(db);
+    const secret = await svc.create(companyId, {
+      name: `dynamic-binding-${randomUUID()}`,
+      provider: "host_command",
+      managedMode: "dynamic_command",
+      dynamicCommand: {
+        provider: "host-command",
+        command: process.execPath,
+        ttlSeconds: 60,
+      },
+    });
+
+    await svc.syncEnvBindingsForTarget(
+      companyId,
+      { targetType: "agent", targetId: "agent-argv" },
+      {
+        GITHUB_TOKEN: {
+          type: "secret_ref",
+          secretId: secret.id,
+          version: "latest",
+          staticArgv: ["--installation", "12345"],
+        },
+      },
+    );
+
+    const bindings = await db
+      .select()
+      .from(companySecretBindings)
+      .where(eq(companySecretBindings.targetId, "agent-argv"));
+    expect(bindings).toHaveLength(1);
+    expect(bindings[0]?.staticArgv).toEqual(["--installation", "12345"]);
+  });
+
   it("syncs top-level secret refs idempotently", async () => {
     const companyId = await seedCompany();
     const svc = secretService(db);

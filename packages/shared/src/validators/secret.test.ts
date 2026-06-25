@@ -3,14 +3,44 @@ import {
   createSecretBindingSchema,
   createSecretProviderConfigSchema,
   createSecretSchema,
+  envBindingSecretRefSchema,
   remoteSecretImportPreviewSchema,
   remoteSecretImportSchema,
   secretProviderConfigDiscoveryPreviewSchema,
   secretProviderConfigPayloadSchema,
+  testDynamicSecretCommandSchema,
   updateSecretProviderConfigSchema,
 } from "./secret.js";
 
 describe("secret validators", () => {
+  it("captures static argv on a secret_ref env binding", () => {
+    const parsed = envBindingSecretRefSchema.parse({
+      type: "secret_ref",
+      secretId: "11111111-1111-1111-1111-111111111111",
+      staticArgv: ["--repo", "acme/widgets"],
+    });
+    expect(parsed.staticArgv).toEqual(["--repo", "acme/widgets"]);
+  });
+
+  it("accepts a secret_ref env binding without static argv", () => {
+    const parsed = envBindingSecretRefSchema.parse({
+      type: "secret_ref",
+      secretId: "11111111-1111-1111-1111-111111111111",
+    });
+    expect(parsed.staticArgv).toBeUndefined();
+  });
+
+  it("validates a dynamic-command test payload and defaults argv to []", () => {
+    const parsed = testDynamicSecretCommandSchema.parse({
+      command: "/usr/local/bin/mint-github-token",
+    });
+    expect(parsed.staticArgv).toEqual([]);
+  });
+
+  it("rejects an empty command on the dynamic-command test payload", () => {
+    expect(() => testDynamicSecretCommandSchema.parse({ command: "  " })).toThrow();
+  });
+
   it("allows dynamic command secrets with host-command generator config", () => {
     const parsed = createSecretSchema.parse({
       name: "GitHub App token",

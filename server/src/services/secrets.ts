@@ -218,7 +218,7 @@ async function cleanupPreparedProviderWrite(input: {
 
 type CanonicalEnvBinding =
   | { type: "plain"; value: string }
-  | { type: "secret_ref"; secretId: string; version: number | "latest" };
+  | { type: "secret_ref"; secretId: string; version: number | "latest"; staticArgv?: string[] };
 
 type SecretConsumerContext = {
   consumerType: SecretBindingTargetType;
@@ -409,6 +409,9 @@ function canonicalizeBinding(binding: EnvBinding): CanonicalEnvBinding {
     type: "secret_ref",
     secretId: binding.secretId,
     version: binding.version ?? "latest",
+    ...(Array.isArray(binding.staticArgv) && binding.staticArgv.length > 0
+      ? { staticArgv: binding.staticArgv.filter((arg): arg is string => typeof arg === "string") }
+      : {}),
   };
 }
 
@@ -1050,6 +1053,9 @@ export function secretService(db: Db) {
         type: "secret_ref",
         secretId: binding.secretId,
         version: binding.version,
+        ...(binding.staticArgv && binding.staticArgv.length > 0
+          ? { staticArgv: binding.staticArgv }
+          : {}),
       };
     }
     return normalized;
@@ -2406,6 +2412,38 @@ export function secretService(db: Db) {
         .then((rows) => rows[0] ?? null);
     },
 
+    // Operator dry-run of a dynamic (host-command) generator. Runs the command
+    // under Paperclip's privileged control exactly as injection would, but
+    // never returns the resolved value — only a pass/fail signal plus
+    // non-sensitive metadata (byte length, posture). Posture is "soft" because
+    // an unbound generator is not yet attached to any hard-isolation
+    // environment; the runtime resolver labels the bound posture per Stage 5.
+    testDynamicCommand: async (input: {
+      command: string;
+      staticArgv?: string[];
+    }): Promise<{
+      ok: boolean;
+      posture: "hard" | "soft";
+      bytes?: number;
+      errorCode?: SecretResolutionErrorCode;
+      message?: string;
+    }> => {
+      try {
+        const value = await runDynamicSecretCommand({
+          command: input.command,
+          staticArgv: normalizeStaticArgv(input.staticArgv ?? EMPTY_STATIC_ARGV),
+        });
+        return { ok: true, posture: "soft", bytes: Buffer.byteLength(value) };
+      } catch (err) {
+        return {
+          ok: false,
+          posture: "soft",
+          errorCode: secretResolutionErrorCode(err),
+          message: err instanceof Error ? err.message : "Dynamic secret generator failed.",
+        };
+      }
+    },
+
     createBinding: async (input: {
       companyId: string;
       secretId: string;
@@ -2553,6 +2591,7 @@ export function secretService(db: Db) {
         secretId: string;
         configPath: string;
         versionSelector: SecretVersionSelector;
+        staticArgv: string[];
       }> = [];
       const pathPrefix = target.pathPrefix ?? "env";
       const bindingDb = options?.db ?? db;
@@ -2566,6 +2605,7 @@ export function secretService(db: Db) {
           secretId: binding.secretId,
           configPath: `${pathPrefix}.${key}`,
           versionSelector: binding.version,
+          staticArgv: binding.staticArgv ?? EMPTY_STATIC_ARGV,
         });
       }
 
@@ -2590,6 +2630,7 @@ export function secretService(db: Db) {
             configPath: ref.configPath,
             versionSelector: String(ref.versionSelector),
             required: true,
+            staticArgv: ref.staticArgv,
           })),
         );
       };
