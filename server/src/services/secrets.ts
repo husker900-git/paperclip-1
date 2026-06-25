@@ -246,6 +246,7 @@ export type RuntimeSecretManifestEntry = {
   secretKey: string;
   version: number;
   provider: SecretProvider;
+  posture: "hard" | "soft";
   outcome: "success" | "failure";
   errorCode?: string | null;
 };
@@ -819,6 +820,7 @@ export function secretService(db: Db) {
           secretKey: secret.key,
           version: resolvedVersion,
           provider: providerId,
+          posture: "soft",
           outcome: "success",
         },
       };
@@ -864,6 +866,7 @@ export function secretService(db: Db) {
           secretKey: input.secret.key,
           version: 0,
           provider: input.secret.provider,
+          posture: "soft",
           outcome: "success",
         },
       };
@@ -915,6 +918,7 @@ export function secretService(db: Db) {
         secretKey: input.secret.key,
         version: 0,
         provider: input.secret.provider,
+        posture: "soft",
         outcome: "success",
       },
     };
