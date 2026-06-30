@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
 import type { ComponentProps, ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IssueThreadInteractionCard } from "./IssueThreadInteractionCard";
@@ -9,6 +9,7 @@ import { ThemeProvider } from "../context/ThemeContext";
 import { TooltipProvider } from "./ui/tooltip";
 import {
   pendingAskUserQuestionsInteraction,
+  commentExpiredAskUserQuestionsInteraction,
   commentExpiredRequestConfirmationInteraction,
   disabledDeclineReasonRequestConfirmationInteraction,
   failedRequestConfirmationInteraction,
@@ -22,6 +23,15 @@ let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+async function act(callback: () => void | Promise<void>) {
+  let result: void | Promise<void> = undefined;
+  flushSync(() => {
+    result = callback();
+  });
+  await result;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 vi.mock("@/lib/router", () => ({
   Link: ({ to, children, className }: { to: string; children: ReactNode; className?: string }) => (
@@ -172,6 +182,26 @@ describe("IssueThreadInteractionCard", () => {
       onSubmitInteractionAnswers: vi.fn(),
     });
     expect(withHandler.textContent).toContain("Cancel question");
+  });
+
+  it("renders expired question interactions as resolved and non-actionable", () => {
+    const host = renderCard({
+      interaction: commentExpiredAskUserQuestionsInteraction,
+      onSubmitInteractionAnswers: vi.fn(),
+      onCancelInteraction: vi.fn(),
+    });
+
+    expect(host.textContent).toContain("Questions expired by comment");
+    expect(host.textContent).toContain("A later board/user comment superseded this question request.");
+    expect(host.textContent).not.toContain("Send answers");
+    expect(host.textContent).not.toContain("Cancel question");
+
+    const jumpLink = Array.from(host.querySelectorAll("a")).find((link) =>
+      link.textContent?.includes("Jump to comment"),
+    );
+    expect(jumpLink?.getAttribute("href")).toBe(
+      "#comment-22222222-2222-4222-8222-222222222222",
+    );
   });
 
   it("makes child tasks explicit in suggested task trees", () => {

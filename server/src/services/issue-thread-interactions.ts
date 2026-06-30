@@ -82,8 +82,21 @@ type RequestConfirmationLikeInteraction =
   | RequestConfirmationInteraction
   | RequestCheckboxConfirmationInteraction;
 
+const USER_COMMENT_SUPERSEDABLE_INTERACTION_KINDS = [
+  ...REQUEST_CONFIRMATION_INTERACTION_KINDS,
+  "ask_user_questions",
+] as const;
+type UserCommentSupersedableKind = (typeof USER_COMMENT_SUPERSEDABLE_INTERACTION_KINDS)[number];
+type UserCommentSupersedableInteraction =
+  | RequestConfirmationLikeInteraction
+  | AskUserQuestionsInteraction;
+
 function isRequestConfirmationLikeKind(kind: string): kind is RequestConfirmationLikeKind {
   return (REQUEST_CONFIRMATION_INTERACTION_KINDS as readonly string[]).includes(kind);
+}
+
+function isUserCommentSupersedableKind(kind: string): kind is UserCommentSupersedableKind {
+  return (USER_COMMENT_SUPERSEDABLE_INTERACTION_KINDS as readonly string[]).includes(kind);
 }
 
 function isIssueThreadInteractionIdempotencyConflict(error: unknown): boolean {
@@ -181,12 +194,20 @@ function shouldReturnAcceptedConfirmationToCreatorAgent(args: {
   return true;
 }
 
-function shouldSupersedeRequestConfirmationOnUserComment(interaction: RequestConfirmationLikeInteraction) {
+function shouldSupersedeInteractionOnUserComment(interaction: UserCommentSupersedableInteraction) {
   return interaction.payload.supersedeOnUserComment === true;
 }
 
 function normalizeCreateInteractionInput(input: CreateIssueThreadInteraction): CreateIssueThreadInteraction {
   switch (input.kind) {
+    case "ask_user_questions":
+      return {
+        ...input,
+        payload: {
+          ...input.payload,
+          supersedeOnUserComment: input.payload.supersedeOnUserComment ?? true,
+        },
+      };
     case "request_confirmation":
       return {
         ...input,
@@ -206,6 +227,24 @@ function normalizeCreateInteractionInput(input: CreateIssueThreadInteraction): C
     default:
       return input;
   }
+}
+
+function buildSupersededByCommentResult(row: IssueThreadInteractionRow, commentId: string) {
+  if (row.kind === "ask_user_questions") {
+    return {
+      version: 1,
+      answers: [],
+      expirationReason: "superseded_by_comment",
+      commentId,
+      summaryMarkdown: null,
+    } as const;
+  }
+
+  return {
+    version: 1,
+    outcome: "superseded_by_comment",
+    commentId,
+  } as const;
 }
 
 function isCommentAtOrAfterInteraction(args: {
@@ -1134,14 +1173,15 @@ export function issueThreadInteractionService(db: Db) {
         .where(and(
           eq(issueThreadInteractions.companyId, issue.companyId),
           eq(issueThreadInteractions.issueId, issue.id),
-          inArray(issueThreadInteractions.kind, [...REQUEST_CONFIRMATION_INTERACTION_KINDS]),
+          inArray(issueThreadInteractions.kind, [...USER_COMMENT_SUPERSEDABLE_INTERACTION_KINDS]),
           eq(issueThreadInteractions.status, "pending"),
         ));
 
       const superseded = rows.filter((row) => {
-        const interaction = hydrateInteraction(row) as RequestConfirmationLikeInteraction;
+        if (!isUserCommentSupersedableKind(row.kind)) return false;
+        const interaction = hydrateInteraction(row) as UserCommentSupersedableInteraction;
         return (
-          shouldSupersedeRequestConfirmationOnUserComment(interaction)
+          shouldSupersedeInteractionOnUserComment(interaction)
           && isCommentAtOrAfterInteraction({
             commentCreatedAt: comment.createdAt,
             interactionCreatedAt: row.createdAt,
@@ -1158,11 +1198,7 @@ export function issueThreadInteractionService(db: Db) {
           .update(issueThreadInteractions)
           .set({
             status: "expired",
-            result: {
-              version: 1,
-              outcome: "superseded_by_comment",
-              commentId: comment.id,
-            },
+            result: buildSupersededByCommentResult(row, comment.id),
             resolvedByAgentId: actor.agentId ?? null,
             resolvedByUserId: actor.userId ?? null,
             resolvedAt: now,
@@ -1192,7 +1228,7 @@ export function issueThreadInteractionService(db: Db) {
           .where(and(
             eq(issueThreadInteractions.companyId, issue.companyId),
             eq(issueThreadInteractions.issueId, issue.id),
-            inArray(issueThreadInteractions.kind, [...REQUEST_CONFIRMATION_INTERACTION_KINDS]),
+            inArray(issueThreadInteractions.kind, [...USER_COMMENT_SUPERSEDABLE_INTERACTION_KINDS]),
             eq(issueThreadInteractions.status, "pending"),
           )),
         db
@@ -1218,8 +1254,9 @@ export function issueThreadInteractionService(db: Db) {
         }
       >();
       for (const row of rows) {
-        const interaction = hydrateInteraction(row) as RequestConfirmationLikeInteraction;
-        if (!shouldSupersedeRequestConfirmationOnUserComment(interaction)) continue;
+        if (!isUserCommentSupersedableKind(row.kind)) continue;
+        const interaction = hydrateInteraction(row) as UserCommentSupersedableInteraction;
+        if (!shouldSupersedeInteractionOnUserComment(interaction)) continue;
 
         const supersedingComment = comments.find((comment) => isCommentAtOrAfterInteraction({
           commentCreatedAt: comment.createdAt,
@@ -1238,27 +1275,28 @@ export function issueThreadInteractionService(db: Db) {
         }
       }
 
+      const rowById = new Map(rows.map((row) => [row.id, row] as const));
       for (const { comment, rowIds } of supersededByComment.values()) {
-        const updatedRows = await db
-          .update(issueThreadInteractions)
-          .set({
-            status: "expired",
-            result: {
-              version: 1,
-              outcome: "superseded_by_comment",
-              commentId: comment.id,
-            },
-            resolvedByAgentId: null,
-            resolvedByUserId: comment.authorUserId,
-            resolvedAt: now,
-            updatedAt: now,
-          })
-          .where(and(
-            inArray(issueThreadInteractions.id, rowIds),
-            eq(issueThreadInteractions.status, "pending"),
-          ))
-          .returning();
-        expired.push(...updatedRows.map(hydrateInteraction));
+        for (const rowId of rowIds) {
+          const row = rowById.get(rowId);
+          if (!row) continue;
+          const [updated] = await db
+            .update(issueThreadInteractions)
+            .set({
+              status: "expired",
+              result: buildSupersededByCommentResult(row, comment.id),
+              resolvedByAgentId: null,
+              resolvedByUserId: comment.authorUserId,
+              resolvedAt: now,
+              updatedAt: now,
+            })
+            .where(and(
+              eq(issueThreadInteractions.id, row.id),
+              eq(issueThreadInteractions.status, "pending"),
+            ))
+            .returning();
+          if (updated) expired.push(hydrateInteraction(updated));
+        }
       }
 
       if (expired.length > 0) {
