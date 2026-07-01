@@ -60,3 +60,11 @@ tests/release-smoke/playwright-report/
 .superpowers/
 .claude/worktrees/
 .herenow
+
+# Local Paperclip instance (PAPERCLIP_HOME); runtime artifacts stay untracked
+paperclip-data/instances/**/db/
+paperclip-data/instances/**/logs/
+paperclip-data/instances/**/data/
+paperclip-data/**/*.pid
+paperclip-data/**/*.sql.gz
+paperclip-data/**/*.ndjson

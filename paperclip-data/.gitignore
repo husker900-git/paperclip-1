@@ -1,0 +1,7 @@
+.DS_Store
+instances/**/db/
+instances/**/logs/
+instances/**/data/
+*.pid
+*.sql.gz
+*.ndjson
